@@ -32,17 +32,18 @@
 #include "SDL_psp2touch_c.h"
 
 #define TOUCH_ACTION_TIMEOUT 100
+#define TOUCH_TAP_TIMEOUT 10
 
 typedef enum TouchActionState {
-    NONE,
-    TAP,
-    TAP_END,
-    HOLD,
+	NONE,
+	TOUCH,
+	TAP,
+	HOLD,
 } TouchActionState ;
 
 typedef struct Point {
-	uint8_t x;
-	uint8_t y;
+	int16_t x;
+	int16_t y;
 } Point;
 
 typedef struct TouchData {
@@ -51,6 +52,7 @@ typedef struct TouchData {
 } TouchData;
 
 TouchData old_front = {0};
+Point prev_points[SCE_TOUCH_MAX_REPORT];
 TouchActionState front_touch_state = NONE;
 uint8_t curr_finger = 0;
 Uint32 current_tick, timeout;
@@ -65,7 +67,7 @@ PSP2_InitTouch(void)
 inline void
 PSP2_EmulateMouseAction(uint8_t button, uint8_t press)
 {
-    SDL_PrivateMouseButton(press ? SDL_PRESSED : SDL_RELEASED, button, 0, 0);
+	SDL_PrivateMouseButton(press ? SDL_PRESSED : SDL_RELEASED, button, 0, 0);
 }
 
 inline void
@@ -83,6 +85,27 @@ PSP2_ReadTouchDevice(uint32_t port, TouchData *out)
 }
 
 inline void
+PSP2_TouchPointDelta(Point *out, Point *olds, Point *news, uint8_t len)
+{
+	int old_x = 0;
+	int old_y = 0;
+	int new_x = 0;
+	int new_y = 0;
+	for (int i = 0; i < len; i++) {
+		old_x += olds[i].x;
+		old_y += olds[i].y;
+		new_x += news[i].x;
+		new_y += news[i].y;
+	}
+	old_x = old_x / len;
+	old_y = old_y / len;
+	new_x = new_x / len;
+	new_y = new_y / len;
+	out->x = (new_x - old_x) / 2;
+	out->y = (new_y - old_y) / 2;
+}
+
+inline void
 PSP2_HandleFrontTouchScreen(TouchData *data)
 {
 	switch (front_touch_state) {
@@ -90,13 +113,14 @@ PSP2_HandleFrontTouchScreen(TouchData *data)
 			if (data->finger <= 0) {
 				return;
 			}
-			front_touch_state = TAP;
+			front_touch_state = TOUCH;
 			timeout = current_tick + TOUCH_ACTION_TIMEOUT;
 			curr_finger = data->finger;
 			return;
-		case TAP:
+		case TOUCH:
 			if (current_tick >= timeout) {
 				front_touch_state = HOLD;
+                memcpy(prev_points, data->points, sizeof(Point) * SCE_TOUCH_MAX_REPORT);
 				return;
 			}
 			if (data->finger > curr_finger) {
@@ -118,10 +142,10 @@ PSP2_HandleFrontTouchScreen(TouchData *data)
 					PSP2_EmulateMouseAction(SDL_BUTTON_MIDDLE, 1);
 					break;
 			}
-			front_touch_state = TAP_END;
-			timeout = current_tick + TOUCH_ACTION_TIMEOUT;
+			front_touch_state = TAP;
+			timeout = current_tick + TOUCH_TAP_TIMEOUT;
 			return;
-		case TAP_END:
+		case TAP:
 			if (current_tick < timeout) {
 				return;
 			}
@@ -139,26 +163,29 @@ PSP2_HandleFrontTouchScreen(TouchData *data)
 			front_touch_state = NONE;
 			return;
 		case HOLD:
-			if (data->finger != curr_finger) {
+			if (data->finger <= 0) {
 				front_touch_state = NONE;
 				return;
 			}
-			switch (curr_finger) {
-				case 1:
-					SDL_PrivateMouseMotion(0, 0, data->points[0].x, data->points[0].y);
-					timeout = current_tick + TOUCH_ACTION_TIMEOUT;
-					return;
-				case 2: {
-					int old_y = (old_front.points[0].y + old_front.points[1].y) / 2;
-					int new_y = (data->points[0].y + data->points[1].y) / 2;
-					int delta = (new_y - old_y) / 2;
-					if (delta == 0) {
-						PSP2_EmulateMouseAction(SDL_BUTTON_WHEELUP, 0);
-						PSP2_EmulateMouseAction(SDL_BUTTON_WHEELDOWN, 0);
-						return;
+			{
+				Point delta;
+				PSP2_TouchPointDelta(&delta, prev_points, data->points, curr_finger);
+				switch (curr_finger) {
+					case 1:
+						SDL_PrivateMouseMotion(0, 1, delta.x, delta.y);
+						timeout = current_tick + TOUCH_ACTION_TIMEOUT;
+						break;
+					case 2: {
+						if (delta.y == 0) {
+							PSP2_EmulateMouseAction(SDL_BUTTON_WHEELUP, 0);
+							PSP2_EmulateMouseAction(SDL_BUTTON_WHEELDOWN, 0);
+							break;
+						}
+						PSP2_EmulateMouseAction(delta.y < 0 ? SDL_BUTTON_WHEELUP : SDL_BUTTON_WHEELDOWN, 1);
+						break;
 					}
-					PSP2_EmulateMouseAction(delta < 0 ? SDL_BUTTON_WHEELUP : SDL_BUTTON_WHEELDOWN, 1);
 				}
+				memcpy(prev_points, data->points, sizeof(Point) * SCE_TOUCH_MAX_REPORT);
 			}
 			return;
 	}
