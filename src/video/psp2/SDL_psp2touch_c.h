@@ -21,30 +21,13 @@
 */
 #include "SDL_config.h"
 
-/* Being a null driver, there's no event stream. We just define stubs for
-   most of the API. */
-
-#include "SDL.h"
-#include "../../events/SDL_sysevents.h"
-#include "../../events/SDL_events_c.h"
+#ifndef _SDL_PSP2TOUCH_H_
+#define _SDL_PSP2TOUCH_H_
 
 #include "SDL_psp2video.h"
-#include "SDL_psp2events_c.h"
-#include "SDL_psp2keyboard_c.h"
-#include "SDL_psp2mouse_c.h"
-#include "SDL_psp2touch_c.h"
 
-void PSP2_PumpEvents(_THIS)
-{
-	PSP2_PollKeyboard();
-	PSP2_PollMouse();
-	PSP2_PollTouch();
-}
+/* Functions to be exported */
+extern void PSP2_InitTouch();
+extern void PSP2_PollTouch();
 
-void PSP2_InitOSKeymap(_THIS)
-{
-	/* do nothing. */
-}
-
-/* end of SDL_psp2events.c ... */
-
+#endif /* _SDL_PSP2TOUCH_H_ */
